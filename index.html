@@ -92,19 +92,29 @@
     let pendingLoad = null;
     let fallbackTimer = null;
     let googleEmail = localStorage.getItem('worship_google_email') || null;
+    let googleName = localStorage.getItem('worship_google_name') || null;
+    let googlePicture = localStorage.getItem('worship_google_picture') || null;
 
     // ── Google Sign-In ─────────────────────────────────────────
     function onGoogleSignIn(response) {
       const payload = JSON.parse(atob(response.credential.split('.')[1]));
       googleEmail = payload.email;
+      googleName = payload.name || null;
+      googlePicture = payload.picture || null;
       localStorage.setItem('worship_google_email', googleEmail);
+      if (googleName) localStorage.setItem('worship_google_name', googleName);
+      if (googlePicture) localStorage.setItem('worship_google_picture', googlePicture);
       renderGoogleSection();
       reloadScore();
     }
 
     function signOutGoogle() {
       googleEmail = null;
+      googleName = null;
+      googlePicture = null;
       localStorage.removeItem('worship_google_email');
+      localStorage.removeItem('worship_google_name');
+      localStorage.removeItem('worship_google_picture');
       google.accounts.id.disableAutoSelect();
       renderGoogleSection();
       reloadScore();
@@ -113,14 +123,20 @@
     function renderGoogleSection() {
       const el = document.getElementById('google-acct-section');
       if (googleEmail) {
+        const photoHtml = googlePicture
+          ? `<img src="${escHtml(googlePicture)}" alt="">`
+          : escHtml((googleName || googleEmail).charAt(0).toUpperCase());
         el.innerHTML = `
           <div class="gacct-row">
-            <span class="gacct-email">${escHtml(googleEmail)}</span>
-            <button class="gacct-switch" onclick="switchGoogleAccount()">Switch</button>
+            <div class="gacct-photo">${photoHtml}</div>
+            <div class="gacct-info">
+              <div class="gacct-name">${escHtml(googleName || googleEmail)}</div>
+              <div class="gacct-email">${escHtml(googleEmail)}</div>
+            </div>
             <button class="gacct-signout" onclick="signOutGoogle()">✕</button>
           </div>`;
       } else {
-        el.innerHTML = `<div id="gsi-btn"></div>`;
+        el.innerHTML = `<div class="gacct-signin-label">Sign in / Sign up</div><div id="gsi-btn"></div>`;
         waitForGIS(() => {
           google.accounts.id.initialize({
             client_id: GOOGLE_CLIENT_ID,
@@ -132,25 +148,6 @@
           });
         });
       }
-    }
-
-    function switchGoogleAccount() {
-      // Sign out of current selection and show account chooser again
-      googleEmail = null;
-      localStorage.removeItem('worship_google_email');
-      const el = document.getElementById('google-acct-section');
-      el.innerHTML = `<div id="gsi-btn"></div>`;
-      waitForGIS(() => {
-        google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: onGoogleSignIn,
-          ux_mode: 'popup',
-        });
-        google.accounts.id.renderButton(document.getElementById('gsi-btn'), {
-          theme: 'filled_black', size: 'medium', shape: 'pill', width: 220, text: 'signin_with'
-        });
-        google.accounts.id.prompt();
-      });
     }
 
     function waitForGIS(fn) {
