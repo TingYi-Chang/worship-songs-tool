@@ -11,9 +11,13 @@ A browser-based worship practice tool for managing song setlists, practicing wit
 - **Score Panel** — Display sheet music from Google Docs/Drive alongside the video
 - **Google Sign-In** — Link your Google account to auto-authenticate score URLs
 
+## Live Demo
+
+**https://tingyi-chang.github.io/worship-songs-tool/**
+
 ## Getting Started
 
-1. Open `index.html` in your browser
+1. Visit the live demo above, or open `index.html` locally in your browser
 2. Click **Manage songs** to go to the admin page and add songs
 3. *(Optional)* Install the Chrome extension from the `/extension` folder for pitch shifting support
 4. Select a song from the sidebar to start practicing
