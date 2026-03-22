@@ -14,9 +14,7 @@
       <div class="sidebar-header">
         <h1>⛪ Worship Practice</h1>
         <p>Select a song to begin &nbsp;·&nbsp; <a href="admin.html" style="color:#7c6af7;text-decoration:none;font-size:11px">Manage songs</a></p>
-        <div class="google-acct-section" id="google-acct-section">
-          <!-- Filled by JS -->
-        </div>
+        <div id="google-acct-section" class="google-acct-section"></div>
       </div>
       <div class="song-list" id="song-list"></div>
     </div>
@@ -66,7 +64,8 @@
             <div class="icon">♩</div>
             <div>No score available</div>
           </div>
-          <iframe id="score-frame" class="score-frame" style="display:none" frameborder="0" allowfullscreen></iframe>
+          <iframe id="score-frame" class="score-frame" style="display:none" frameborder="0" allowfullscreen
+            allow="autoplay" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
         </div>
       </div>
 
@@ -85,115 +84,105 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="app.js"></script>
   <script>
+    const GOOGLE_CLIENT_ID = '1020575328429-dgmji6ps2kv9dqg5uc05tbs5veo2bcuv.apps.googleusercontent.com';
+
     let ytPlayer = null;
     let currentSpeed = 1;
     let currentSongId = null;
-    let pendingLoad = null;   // {song, semitones} waiting for extension ack
-    let fallbackTimer = null; // fires if extension isn't installed
+    let pendingLoad = null;
+    let fallbackTimer = null;
+    let googleEmail = localStorage.getItem('worship_google_email') || null;
 
-    // ── Google OAuth ───────────────────────────────────────────
-    let googleUser = null; // { email, name, picture }
-
-    function loadGoogleUser() {
-      try { return JSON.parse(localStorage.getItem('worship_google_user')) || null; }
-      catch { return null; }
-    }
-    function saveGoogleUser(u) {
-      localStorage.setItem('worship_google_user', u ? JSON.stringify(u) : 'null');
-    }
-    function getClientId() {
-      return localStorage.getItem('worship_google_client_id') || '';
-    }
-    function saveClientId(id) {
-      localStorage.setItem('worship_google_client_id', id);
-    }
-
-    // Called by GIS after sign-in
-    function handleGoogleCredential(response) {
-      // Decode JWT payload (no verification needed — we're just reading the identity)
+    // ── Google Sign-In ─────────────────────────────────────────
+    function onGoogleSignIn(response) {
       const payload = JSON.parse(atob(response.credential.split('.')[1]));
-      googleUser = { email: payload.email, name: payload.name, picture: payload.picture };
-      saveGoogleUser(googleUser);
+      googleEmail = payload.email;
+      localStorage.setItem('worship_google_email', googleEmail);
       renderGoogleSection();
+      reloadScore();
     }
 
     function signOutGoogle() {
-      googleUser = null;
-      saveGoogleUser(null);
+      googleEmail = null;
+      localStorage.removeItem('worship_google_email');
+      google.accounts.id.disableAutoSelect();
       renderGoogleSection();
-    }
-
-    // Rewrite Google URLs to use the signed-in account (authuser=email)
-    function applyGoogleAccount(url) {
-      if (!googleUser || !url) return url;
-      try {
-        const u = new URL(url);
-        if (u.hostname.endsWith('.google.com')) {
-          u.searchParams.set('authuser', googleUser.email);
-        }
-        return u.toString();
-      } catch { return url; }
-    }
-
-    function initGoogleSignIn(clientId) {
-      if (!clientId || typeof google === 'undefined') return;
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleGoogleCredential,
-        auto_select: true,
-      });
-      // Render button into the sidebar section
-      const btn = document.getElementById('gsi-btn');
-      if (btn) {
-        google.accounts.id.renderButton(btn, {
-          theme: 'filled_black', size: 'medium', shape: 'pill', width: 200
-        });
-        google.accounts.id.prompt(); // show one-tap if available
-      }
+      reloadScore();
     }
 
     function renderGoogleSection() {
-      const section = document.getElementById('google-acct-section');
-      if (!section) return;
-      if (googleUser) {
-        section.innerHTML = `
-          <div class="gacct-signed-in">
-            <img src="${escHtml(googleUser.picture)}" class="gacct-avatar" alt="">
-            <div class="gacct-info">
-              <div class="gacct-name">${escHtml(googleUser.name)}</div>
-              <div class="gacct-email">${escHtml(googleUser.email)}</div>
-            </div>
+      const el = document.getElementById('google-acct-section');
+      if (googleEmail) {
+        el.innerHTML = `
+          <div class="gacct-row">
+            <span class="gacct-email">${escHtml(googleEmail)}</span>
+            <button class="gacct-switch" onclick="switchGoogleAccount()">Switch</button>
             <button class="gacct-signout" onclick="signOutGoogle()">✕</button>
           </div>`;
       } else {
-        const clientId = getClientId();
-        section.innerHTML = `
-          <div class="gacct-setup">
-            ${!clientId ? `<input id="gsi-client-input" class="gsi-client-input" placeholder="Paste Google OAuth Client ID…">
-            <button class="gacct-save-btn" onclick="saveClientIdAndInit()">Save</button>` : ''}
-            <div id="gsi-btn" style="margin-top:6px"></div>
-          </div>`;
-        if (clientId) {
-          // Wait for GIS to load then render button
-          const tryInit = () => {
-            if (typeof google !== 'undefined') initGoogleSignIn(clientId);
-            else setTimeout(tryInit, 200);
-          };
-          tryInit();
-        }
+        el.innerHTML = `<div id="gsi-btn"></div>`;
+        waitForGIS(() => {
+          google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: onGoogleSignIn,
+            ux_mode: 'popup',
+          });
+          google.accounts.id.renderButton(document.getElementById('gsi-btn'), {
+            theme: 'filled_black', size: 'medium', shape: 'pill', width: 220, text: 'signin_with'
+          });
+        });
       }
     }
 
-    function saveClientIdAndInit() {
-      const val = document.getElementById('gsi-client-input')?.value.trim();
-      if (!val) return;
-      saveClientId(val);
-      renderGoogleSection();
-      const tryInit = () => {
-        if (typeof google !== 'undefined') initGoogleSignIn(val);
-        else setTimeout(tryInit, 200);
-      };
-      tryInit();
+    function switchGoogleAccount() {
+      // Sign out of current selection and show account chooser again
+      googleEmail = null;
+      localStorage.removeItem('worship_google_email');
+      const el = document.getElementById('google-acct-section');
+      el.innerHTML = `<div id="gsi-btn"></div>`;
+      waitForGIS(() => {
+        google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: onGoogleSignIn,
+          ux_mode: 'popup',
+        });
+        google.accounts.id.renderButton(document.getElementById('gsi-btn'), {
+          theme: 'filled_black', size: 'medium', shape: 'pill', width: 220, text: 'signin_with'
+        });
+        google.accounts.id.prompt();
+      });
+    }
+
+    function waitForGIS(fn) {
+      if (typeof google !== 'undefined' && google.accounts) fn();
+      else setTimeout(() => waitForGIS(fn), 100);
+    }
+
+    function applyGoogleAccount(url) {
+      if (!url) return url;
+      try {
+        const u = new URL(url);
+        if (!u.hostname.endsWith('.google.com')) return url;
+
+        // Convert to /preview embed format
+        u.pathname = u.pathname
+          .replace(/\/(edit|view|pub)(\/.*)?$/, '/preview')
+          .replace(/\/(htmlview)(\/.*)?$/, '/preview');
+
+        // Strip non-embed params, keep only the file path clean
+        const embedUrl = new URL(u.origin + u.pathname);
+        if (googleEmail) embedUrl.searchParams.set('authuser', googleEmail);
+        embedUrl.searchParams.set('rm', 'minimal');
+        return embedUrl.toString();
+      } catch { return url; }
+    }
+
+    function reloadScore() {
+      if (!currentSongId) return;
+      const song = loadSongs().find(s => s.id === currentSongId);
+      if (song && song.scoreUrl) {
+        document.getElementById('score-frame').src = applyGoogleAccount(song.scoreUrl);
+      }
     }
 
     // ── Song list ──────────────────────────────────────────────
@@ -205,7 +194,6 @@
         return;
       }
 
-      // Group songs by date
       const groups = {};
       songs.forEach(song => {
         const key = song.date || '';
@@ -213,7 +201,6 @@
         groups[key].push(song);
       });
 
-      // Sort groups: dated ones descending, undated at end
       const sortedKeys = Object.keys(groups).sort((a, b) => {
         if (!a) return 1;
         if (!b) return -1;
@@ -253,7 +240,6 @@
       currentSongId = id;
       const semitones = getSemitones(song.originalKey, song.targetKey);
 
-      // Update key bar
       document.getElementById('key-bar').style.display = 'flex';
       document.getElementById('speed-bar').style.display = 'flex';
       document.getElementById('bar-title').textContent = song.title;
@@ -262,7 +248,6 @@
       document.getElementById('bar-semitones').textContent =
         semitones === 0 ? '0' : (semitones > 0 ? `+${semitones}` : `${semitones}`) + ' st';
 
-      // Update score panel
       const scoreFrame = document.getElementById('score-frame');
       const scorePlaceholder = document.getElementById('score-placeholder');
       if (song.scoreUrl) {
@@ -278,9 +263,6 @@
       setBadge('waiting');
       renderSidebar();
 
-      // Ask the content script to write semitones to chrome.storage (page JS can't do this).
-      // content-worship.js will reply with 'worshipSemitonesReady', then we load the player.
-      // A fallback timer loads the player directly if the extension isn't installed.
       pendingLoad = { song, semitones };
       clearTimeout(fallbackTimer);
       fallbackTimer = setTimeout(() => {
@@ -294,10 +276,7 @@
 
     function loadPlayer(song, semitones) {
       const videoId = extractVideoId(song.youtubeUrl);
-      if (!videoId) {
-        alert('Could not parse the YouTube URL for this song.');
-        return;
-      }
+      if (!videoId) { alert('Could not parse the YouTube URL for this song.'); return; }
 
       document.getElementById('player-placeholder').style.display = 'none';
       document.getElementById('player-container').style.display = 'block';
@@ -308,22 +287,11 @@
         ytPlayer.loadVideoById(videoId);
       } else {
         ytPlayer = new YT.Player('yt-player', {
-          width: '100%',
-          height: '100%',
-          videoId: videoId,
-          playerVars: {
-            autoplay: 1,
-            rel: 0,
-            modestbranding: 1,
-            origin: location.origin
-          },
-          events: {
-            onReady: (e) => e.target.setPlaybackRate(currentSpeed)
-          }
+          width: '100%', height: '100%', videoId,
+          playerVars: { autoplay: 1, rel: 0, modestbranding: 1, origin: location.origin },
+          events: { onReady: (e) => e.target.setPlaybackRate(currentSpeed) }
         });
       }
-
-      // If no shift needed, confirm immediately
       if (semitones === 0) setBadge('no-shift');
     }
 
@@ -341,20 +309,12 @@
       text.textContent = labels[state] || '';
     }
 
-    // Listen for messages from content-worship.js
     window.addEventListener('message', (e) => {
       if (!e.data) return;
-
-      // Extension stored the semitones — safe to load the iframe now
       if (e.data.type === 'worshipSemitonesReady') {
         clearTimeout(fallbackTimer);
-        if (pendingLoad) {
-          const p = pendingLoad; pendingLoad = null;
-          loadPlayer(p.song, p.semitones);
-        }
+        if (pendingLoad) { const p = pendingLoad; pendingLoad = null; loadPlayer(p.song, p.semitones); }
       }
-
-      // Extension confirmed pitch was applied
       if (e.data.type === 'worshipPitchApplied') {
         setBadge(e.data.semitones === 0 ? 'no-shift' : 'applied');
       }
@@ -364,9 +324,7 @@
     function setSpeed(rate) {
       currentSpeed = rate;
       updateSpeedButtons(rate);
-      if (ytPlayer && typeof ytPlayer.setPlaybackRate === 'function') {
-        ytPlayer.setPlaybackRate(rate);
-      }
+      if (ytPlayer && typeof ytPlayer.setPlaybackRate === 'function') ytPlayer.setPlaybackRate(rate);
     }
 
     function updateSpeedButtons(rate) {
@@ -375,23 +333,15 @@
       });
     }
 
-    // ── YouTube IFrame API callback ───────────────────────────
-    function onYouTubeIframeAPIReady() {
-      // Player is created on first song selection
-    }
+    function onYouTubeIframeAPIReady() {}
 
     function escHtml(str) {
       return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    // Init Google section on load
-    googleUser = loadGoogleUser();
     renderGoogleSection();
-
     renderSidebar();
   </script>
 </body>
