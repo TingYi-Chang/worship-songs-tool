@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Worship Pitch Shifter",
+  "version": "1.0",
+  "description": "Automatically pitch-shifts YouTube videos on the Worship Practice app.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://localhost/*",
+    "file:///*",
+    "https://www.youtube.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "file:///*"],
+      "js": ["content-worship.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/embed/*"],
+      "js": ["content-youtube.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

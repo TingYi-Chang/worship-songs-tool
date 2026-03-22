@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Worship Practice — Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="admin-page">
+  <div class="admin-layout">
+    <div class="admin-header">
+      <h1>⛪ Song Management</h1>
+      <p>Add and manage songs for worship practice. &nbsp;<a href="index.html">← Back to practice</a></p>
+    </div>
+
+    <div class="add-form">
+      <div class="form-group">
+        <label>Song Title</label>
+        <input type="text" id="input-title" class="input-title" placeholder="e.g. Amazing Grace">
+      </div>
+      <div class="form-group">
+        <label>YouTube URL</label>
+        <input type="text" id="input-url" class="input-url" placeholder="https://youtube.com/watch?v=...">
+      </div>
+      <div class="form-group">
+        <label>Original Key</label>
+        <select id="input-orig" class="input-key"></select>
+      </div>
+      <div class="form-group">
+        <label>Target Key</label>
+        <select id="input-target" class="input-key"></select>
+      </div>
+      <div class="form-group">
+        <label>Service Date</label>
+        <input type="date" id="input-date" class="input-url">
+      </div>
+      <div class="form-group">
+        <label>Score URL (Google Note / Doc)</label>
+        <input type="text" id="input-score" class="input-url" placeholder="https://...">
+      </div>
+      <button class="btn-add" onclick="addSong()">+ Add Song</button>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="song-table" id="song-table">
+      <div class="song-table-header">
+        <span>Title</span>
+        <span>YouTube URL</span>
+        <span style="text-align:center">Orig. Key</span>
+        <span style="text-align:center">Target Key</span>
+        <span style="text-align:center">Date</span>
+        <span>Score URL</span>
+        <span style="text-align:right">Actions</span>
+      </div>
+      <div id="song-rows"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const KEYS_LIST = KEYS;
+
+    function populateKeySelects() {
+      ['input-orig', 'input-target'].forEach(id => {
+        const sel = document.getElementById(id);
+        KEYS_LIST.forEach(k => {
+          const opt = document.createElement('option');
+          opt.value = k;
+          opt.textContent = k;
+          if (k === 'G') opt.selected = true;
+          sel.appendChild(opt);
+        });
+      });
+      document.getElementById('input-target').value = 'A';
+    }
+
+    function keyOptions(selected) {
+      return KEYS_LIST.map(k =>
+        `<option value="${k}" ${k === selected ? 'selected' : ''}>${k}</option>`
+      ).join('');
+    }
+
+    function renderSongs() {
+      const songs = loadSongs();
+      const container = document.getElementById('song-rows');
+      if (songs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No songs yet — add one above.</div>';
+        return;
+      }
+      container.innerHTML = songs.map(song => `
+        <div class="song-row" id="row-${song.id}">
+          <span class="col-title">${escHtml(song.title)}</span>
+          <span class="col-url" title="${escHtml(song.youtubeUrl)}">${escHtml(song.youtubeUrl)}</span>
+          <span class="col-key orig">${escHtml(song.originalKey)}</span>
+          <span class="col-key target">${escHtml(song.targetKey)}</span>
+          <span class="col-date">${song.date ? escHtml(song.date) : '—'}</span>
+          <span class="col-url" title="${escHtml(song.scoreUrl || '')}">${song.scoreUrl ? escHtml(song.scoreUrl) : '—'}</span>
+          <div class="col-actions">
+            <button class="btn-edit" onclick="startEdit(${song.id})">✎ Edit</button>
+            <button class="btn-remove" onclick="removeSong(${song.id})">✕ Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function startEdit(id) {
+      const songs = loadSongs();
+      const song = songs.find(s => s.id === id);
+      if (!song) return;
+      const row = document.getElementById(`row-${id}`);
+      row.classList.add('editing');
+      row.innerHTML = `
+        <input type="text" class="edit-input input-title" value="${escHtml(song.title)}" id="edit-title-${id}">
+        <input type="text" class="edit-input input-url" value="${escHtml(song.youtubeUrl)}" id="edit-url-${id}">
+        <select class="input-key" id="edit-orig-${id}">${keyOptions(song.originalKey)}</select>
+        <select class="input-key" id="edit-target-${id}">${keyOptions(song.targetKey)}</select>
+        <input type="date" class="edit-input" value="${escHtml(song.date || '')}" id="edit-date-${id}">
+        <input type="text" class="edit-input" value="${escHtml(song.scoreUrl || '')}" id="edit-score-${id}" placeholder="Score URL">
+        <div class="col-actions">
+          <button class="btn-save" onclick="saveEdit(${id})">✓ Save</button>
+          <button class="btn-cancel" onclick="renderSongs()">✕ Cancel</button>
+        </div>
+      `;
+    }
+
+    function saveEdit(id) {
+      const title = document.getElementById(`edit-title-${id}`).value.trim();
+      const url = document.getElementById(`edit-url-${id}`).value.trim();
+      const originalKey = document.getElementById(`edit-orig-${id}`).value;
+      const targetKey = document.getElementById(`edit-target-${id}`).value;
+      const date = document.getElementById(`edit-date-${id}`).value;
+      const scoreUrl = document.getElementById(`edit-score-${id}`).value.trim();
+
+      if (!title || !url) {
+        alert('Please fill in the song title and YouTube URL.');
+        return;
+      }
+      if (!extractVideoId(url)) {
+        alert('Could not parse a YouTube video ID from that URL. Please check the link.');
+        return;
+      }
+
+      const songs = loadSongs();
+      const idx = songs.findIndex(s => s.id === id);
+      if (idx !== -1) {
+        songs[idx] = { id, title, youtubeUrl: url, originalKey, targetKey, date: date || '', scoreUrl: scoreUrl || '' };
+        saveSongs(songs);
+      }
+      renderSongs();
+    }
+
+    function addSong() {
+      const title = document.getElementById('input-title').value.trim();
+      const url = document.getElementById('input-url').value.trim();
+      const originalKey = document.getElementById('input-orig').value;
+      const targetKey = document.getElementById('input-target').value;
+      const errEl = document.getElementById('error-msg');
+
+      if (!title || !url) {
+        errEl.textContent = 'Please fill in the song title and YouTube URL.';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (!extractVideoId(url)) {
+        errEl.textContent = 'Could not parse a YouTube video ID from that URL. Please check the link.';
+        errEl.style.display = 'block';
+        return;
+      }
+      errEl.style.display = 'none';
+
+      const date = document.getElementById('input-date').value;
+      const scoreUrl = document.getElementById('input-score').value.trim();
+      const songs = loadSongs();
+      songs.push({ id: Date.now(), title, youtubeUrl: url, originalKey, targetKey, date: date || '', scoreUrl: scoreUrl || '' });
+      saveSongs(songs);
+
+      document.getElementById('input-title').value = '';
+      document.getElementById('input-url').value = '';
+      document.getElementById('input-score').value = '';
+      renderSongs();
+    }
+
+    function removeSong(id) {
+      const songs = loadSongs().filter(s => s.id !== id);
+      saveSongs(songs);
+      renderSongs();
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    populateKeySelects();
+    renderSongs();
+  </script>
+</body>
+</html>
